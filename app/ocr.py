@@ -59,7 +59,7 @@ def apply_learned_fixes(text: str) -> tuple[str, list[str]]:
 def recognize(page_id: str) -> tuple[str, list[str]]:
     """Returns (text, words to double-check)."""
     if BACKEND == "mock":
-        raw = "# Lietuvių kalba\n\nŠiandien mokėmės apie {{dalyvius}} ir padalyvius.\n\n- ąžuolas\n- čiužinys\n- **ėjimas**"
+        raw = "# Lietuvių kalba\n\nŠiandien mokemės apie {{dalyvius}} ir padalyvius.\n\n- ąžuolas\n- čiužinys\n- **ėjimas**"
     else:
         from . import local_model
 

@@ -2,7 +2,9 @@
 
 Stop the server first (the GPU can't hold two copies of the model), then run:
     python -m app.train            # or train.bat on Windows
-Options: --epochs 3 --lr 1e-4 --rank 16 --no-eval --fresh
+Options: --epochs 3 --lr 1e-4 --rank 16 --synth 1500 --no-eval --fresh
+
+Synthetic lines from synth.py (synth.bat) are mixed in: a fresh random share of them each epoch.
 """
 
 import argparse
@@ -12,7 +14,7 @@ import time
 
 from PIL import Image, ImageEnhance
 
-from . import local_model, storage
+from . import local_model, storage, synth
 from .ocr import BASE_PROMPT
 
 
@@ -21,6 +23,11 @@ def collect_examples() -> list[tuple]:
                 if p["status"] == "verified" and p["text"].strip()]
     examples += [(storage.sample_image_path(s["id"]), s["label"]) for s in storage.list_samples() if s["label"].strip()]
     return examples
+
+
+def synthetic_examples() -> list[tuple]:
+    return [(synth.line_image_path(l["id"]), l["label"]) for l in synth.list_lines()
+            if synth.line_image_path(l["id"]).exists()]
 
 
 def augment(img: Image.Image) -> Image.Image:
@@ -84,6 +91,8 @@ def main():
     ap.add_argument("--no-eval", action="store_true", help="skip measuring accuracy before/after")
     ap.add_argument("--fresh", action="store_true", help="start from the base model instead of the last adapter")
     ap.add_argument("--max-steps", type=int, default=0, help="stop after N optimizer steps (for testing)")
+    ap.add_argument("--synth", type=int, default=-1,
+                    help="synthetic lines per epoch (default: twice your own examples, at most 1500; 0 = none)")
     args = ap.parse_args()
 
     import torch
@@ -97,7 +106,11 @@ def main():
     pages_only = [e for e in examples if e[0].name == "image.jpg"]
     holdout = [] if args.no_eval or len(pages_only) < 5 else pages_only[: max(1, min(5, len(pages_only) // 10))]
     train_set = [e for e in examples if e not in holdout]
-    print(f"Примеров для обучения: {len(train_set)}, для проверки точности: {len(holdout)}")
+    synthetic = synthetic_examples()
+    per_epoch = args.synth if args.synth >= 0 else min(1500, 2 * len(train_set))
+    per_epoch = min(per_epoch, len(synthetic))
+    print(f"Примеров для обучения: {len(train_set)} своих + {per_epoch} синтетических за эпоху "
+          f"(всего синтетических {len(synthetic)}), для проверки точности: {len(holdout)}")
     print(f"Модель: {local_model.model_name()} на {local_model.device()}")
 
     processor = local_model.load_processor()
@@ -127,22 +140,24 @@ def main():
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
-    total_steps = (len(train_set) * args.epochs + args.accum - 1) // args.accum
+    epoch_size = len(train_set) + per_epoch
+    total_steps = args.epochs * ((epoch_size + args.accum - 1) // args.accum)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda s: max(0.0, 1 - s / max(total_steps, 1)))
     use_bf16 = local_model.device() == "cuda"
 
     model.train()
     step, started = 0, time.time()
     for epoch in range(args.epochs):
-        random.shuffle(train_set)
+        epoch_set = train_set + random.sample(synthetic, per_epoch)
+        random.shuffle(epoch_set)
         running = 0.0
-        for i, (path, text) in enumerate(train_set, 1):
+        for i, (path, text) in enumerate(epoch_set, 1):
             batch = encode(processor, augment(Image.open(path).convert("RGB")), text).to(model.device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_bf16):
                 loss = model(**batch).loss / args.accum
             loss.backward()
             running += loss.item() * args.accum
-            if i % args.accum == 0 or i == len(train_set):
+            if i % args.accum == 0 or i == len(epoch_set):
                 torch.nn.utils.clip_grad_norm_(params, 1.0)
                 optimizer.step()
                 scheduler.step()

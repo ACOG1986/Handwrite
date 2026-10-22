@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from . import docx_export, learning, ocr, segment, storage
+from . import context_fix, docx_export, gpu, learning, ocr, segment, spell, storage, synth
 
 STATIC = Path(__file__).parent / "static"
 
@@ -23,7 +23,7 @@ def _preload_model():
     from . import local_model
 
     try:
-        with local_model._lock:
+        with gpu.use("reader"):
             local_model._load()
         adapter = " + ваш адаптер почерка" if local_model.has_adapter() else ""
         print(f"Модель загружена: {local_model.model_name()} ({local_model.device()}){adapter}", flush=True)
@@ -81,6 +81,9 @@ async def lifespan(_app):
     print("  Телефон не подключается? Запустите allow_phone.bat (разрешит порт 8000 в брандмауэре).\n", flush=True)
     if ocr.BACKEND == "local":
         threading.Thread(target=_preload_model, daemon=True).start()
+    threading.Thread(target=spell.available, daemon=True).start()  # downloads the dictionary on first run
+    if context_fix.enabled():
+        context_fix.start_worker()
     yield
 
 
@@ -97,7 +100,9 @@ def _page_or_404(page_id: str) -> dict:
 def _run_ocr(page: dict) -> dict:
     try:
         text, uncertain = ocr.recognize(page["id"])
-        page.update(status="recognized", ocr_text=text, text=text, uncertain=uncertain, error=None)
+        page.update(status="recognized", ocr_text=text, text=text, uncertain=uncertain, error=None,
+                    unknown=spell.unknown_words(text), changes=[],
+                    fix_status="pending" if context_fix.enabled() else None, fix_error=None)
     except ocr.OCRError as e:
         page.update(status="error", error=str(e))
     storage.save_page(page)
@@ -280,6 +285,9 @@ def delete_sample(sample_id: str):
 def stats():
     pages = storage.list_pages()
     return {
+        "proofreader": {"enabled": context_fix.enabled(), "model": context_fix.model_name() if context_fix.enabled() else "",
+                        "loaded": context_fix.is_loaded(), "dictionary": spell.available()},
+        "synthetic": len(synth.list_lines()),
         "pages": len(pages),
         "verified": sum(p["status"] == "verified" for p in pages),
         "samples": len(storage.list_samples()),

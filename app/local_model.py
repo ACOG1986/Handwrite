@@ -1,10 +1,9 @@
 """Local vision-language model (Qwen-VL via transformers). Runs on an NVIDIA GPU, Apple Silicon or CPU."""
 
 import os
-import threading
 from pathlib import Path
 
-from . import storage
+from . import gpu, storage
 
 # On a 12 GB card the 8B model fits in 4-bit (~6 GB); on smaller machines use the 2B model.
 DEFAULT_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
@@ -16,7 +15,7 @@ ADAPTER_DIR = storage.DATA_DIR / "adapter"  # LoRA weights trained on the user's
 MAX_PIXELS = int(os.environ.get("HANDAPP_MAX_PIXELS", str(1600 * 28 * 28)))
 MAX_NEW_TOKENS = int(os.environ.get("HANDAPP_MAX_NEW_TOKENS", "2048"))
 
-_lock = threading.Lock()
+_lock = gpu.lock  # shared with the proofreader (context_fix.py): one model on the GPU at a time
 _model = None
 _processor = None
 
@@ -86,18 +85,22 @@ def _load():
     _model = model
 
 
+def unload():
+    """Free the GPU for the proofreader. Call with the GPU lock held."""
+    global _model, _processor
+    if _model is None:
+        return
+    _model = _processor = None
+    gpu.free_cache()
+
+
+gpu.register("reader", unload)
+
+
 def reload():
     """Drop the loaded model so the next request picks up a freshly trained adapter."""
-    global _model, _processor
     with _lock:
-        _model = _processor = None
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        unload()
 
 
 def is_loaded() -> bool:
@@ -119,7 +122,7 @@ def generate(image_path: Path, prompt: str) -> str:
     import torch
     from PIL import Image
 
-    with _lock:  # one page at a time: the GPU can't hold two
+    with gpu.use("reader"):  # one page at a time: the GPU can't hold two
         _load()
         image = Image.open(image_path).convert("RGB")
         inputs = _processor.apply_chat_template(

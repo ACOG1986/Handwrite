@@ -10,12 +10,12 @@
 <style>
   :root {
     --bg: #f6f5f2; --card: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc;
-    --accent: #2f5bd3; --accent-text: #fff; --warn: #b3261e; --warn-bg: #fdecea; --hl: #fff2b3;
+    --accent: #2f5bd3; --accent-text: #fff; --warn: #b3261e; --warn-bg: #fdecea; --hl: #fff2b3; --fix: #d6ecff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141416; --card: #1f1f22; --text: #f2f2f4; --muted: #9a9aa2; --line: #333338;
-      --accent: #6d8ff0; --accent-text: #0d0d10; --warn: #ff8a80; --warn-bg: #3a1d1b; --hl: #5a4c12;
+      --accent: #6d8ff0; --accent-text: #0d0d10; --warn: #ff8a80; --warn-bg: #3a1d1b; --hl: #5a4c12; --fix: #1e3a57;
     }
   }
   * { box-sizing: border-box; }
@@ -46,6 +46,8 @@
                      background: var(--card); color: var(--text); width: 100%; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
   .chip { background: var(--hl); border-radius: 999px; padding: 2px 10px; font-size: 14px; cursor: pointer; }
+  .chip.fixed { background: var(--fix); }
+  .chip.unknown { background: transparent; border: 1px dashed var(--muted); }
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
   .badge.verified { border-color: #2e7d32; color: #2e7d32; }
   .letters { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: none; gap: 4px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
@@ -212,9 +214,11 @@ function pageCard(p, index) {
   const status = p.status === "verified" ? '<span class="badge verified">проверено</span>'
                : p.status === "pending" ? '<span class="badge"><span class="spinner"></span> распознаю…</span>'
                : '<span class="badge">распознано</span>';
+  const fixing = p.fix_status === "pending" && p.status === "recognized"
+    ? '<span class="badge"><span class="spinner"></span> проверяю по смыслу…</span>' : "";
   card.innerHTML = `
     <div class="row" style="margin-bottom:8px">
-      <strong>Стр. ${index + 1}</strong> ${status}
+      <strong>Стр. ${index + 1}</strong> ${status} ${fixing}
       <span class="grow"></span>
       <button class="small" data-a="up" title="Выше">↑</button>
       <button class="small" data-a="down" title="Ниже">↓</button>
@@ -224,8 +228,13 @@ function pageCard(p, index) {
       ${p.id.startsWith("tmp-") ? '<div class="muted">Загружаю фото…</div>' : `<img src="/api/pages/${p.id}/image" alt="Фото страницы" loading="lazy">`}
       <div>
         ${p.error ? `<p class="error">${esc(p.error)}</p>` : ""}
-        ${p.uncertain?.length ? `<div class="muted">Не уверен в словах (нажмите, чтобы найти):</div>
-          <div class="chips">${p.uncertain.map(w => `<span class="chip">${esc(w)}</span>`).join("")}</div>` : ""}
+        ${p.changes?.length ? `<div class="muted">Исправлено по смыслу, проверьте (нажмите, чтобы найти):</div>
+          <div class="chips">${p.changes.map(c => `<span class="chip fixed" data-find="${esc(c.to)}">${esc(c.from)} → ${esc(c.to)}</span>`).join("")}</div>` : ""}
+        ${p.uncertain?.length ? `<div class="muted">Не уверен в словах:</div>
+          <div class="chips">${p.uncertain.map(w => `<span class="chip" data-find="${esc(w)}">${esc(w)}</span>`).join("")}</div>` : ""}
+        ${p.unknown?.length ? `<div class="muted">Нет в словаре:</div>
+          <div class="chips">${p.unknown.map(w => `<span class="chip unknown" data-find="${esc(w)}">${esc(w)}</span>`).join("")}</div>` : ""}
+        ${p.fix_status === "error" ? `<div class="muted">Проверка по смыслу не сработала: ${esc(p.fix_error || "")}</div>` : ""}
         <textarea spellcheck="true" lang="lt">${esc(p.text || "")}</textarea>
         <div class="row" style="margin-top:8px">
           <button class="primary grow" data-a="save">Сохранить исправления</button>
@@ -237,12 +246,14 @@ function pageCard(p, index) {
     </div>`;
   const ta = $("textarea", card);
   const msg = $("[data-msg]", card);
-  ta.oninput = () => { p.text = ta.value; };  // survive re-renders while other pages upload
+  ta.oninput = () => { p.text = ta.value; p._edited = true; };  // survive re-renders while other pages upload
   const img = $("img", card);
   if (img) img.onclick = () => { $("#zoom img").src = `/api/pages/${p.id}/image`; $("#zoom").style.display = "block"; };
   card.querySelectorAll(".chip").forEach(c => c.onclick = () => {
-    const i = ta.value.indexOf(c.textContent);
-    if (i >= 0) { ta.focus(); ta.setSelectionRange(i, i + c.textContent.length); }
+    const word = c.dataset.find;
+    const quoted = word.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+    const i = ta.value.search(new RegExp("(?<![\\p{L}\\p{N}])" + quoted + "(?![\\p{L}\\p{N}])", "u"));
+    if (i >= 0) { ta.focus(); ta.setSelectionRange(i, i + word.length); }
   });
   ta.addEventListener("focus", () => activeArea = ta);
   card.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
@@ -256,6 +267,7 @@ function pageCard(p, index) {
         const r = await (await api(`/api/pages/${p.id}`, { method: "PUT", headers: { "Content-Type": "application/json" },
                                                           body: JSON.stringify({ text: ta.value }) })).json();
         Object.assign(p, r);
+        p._edited = false;
         msg.textContent = r.learned ? `Сохранено. Запомнил исправлений: ${r.learned}.` : "Сохранено.";
         b.disabled = false;
         return;
@@ -322,6 +334,25 @@ $("#export").onclick = async () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   } catch (e) { alert(e.message); }
 };
+
+// While the proofreader works in the background, check every few seconds for its result.
+setInterval(async () => {
+  const waiting = docIds.filter(id => pages.find(p => p.id === id)?.fix_status === "pending");
+  if (!waiting.length || document.activeElement?.tagName === "TEXTAREA") return;  // don't re-render under the user's fingers
+  try {
+    const fresh = await (await api("/api/pages")).json();
+    let changed = false;
+    for (const id of waiting) {
+      const p = pages.find(x => x.id === id), f = fresh.find(x => x.id === id);
+      if (!p || !f || f.fix_status === "pending") continue;
+      const local = p._edited ? p.text : null;  // keep what the user already typed
+      Object.assign(p, f);
+      if (local !== null) { p.text = local; p._edited = true; }
+      changed = true;
+    }
+    if (changed) render();
+  } catch {}
+}, 4000);
 
 // ---------- Lithuanian letter bar ----------
 let activeArea = null;
@@ -430,8 +461,11 @@ async function loadStats() {
   $("#stats").innerHTML = `
     <p style="margin-top:0">Страниц: <b>${s.pages}</b>, проверено вами: <b>${s.verified}</b>, образцов почерка: <b>${s.samples}</b>.</p>
     <p class="muted">Модель: ${esc(s.model)} (${esc(s.device)})${s.adapter ? ", дообучена на вашем почерке" : ", ещё не дообучена"}${s.loaded ? "" : ". Модель загружается…"}</p>
+    <p class="muted">Проверка по смыслу: ${s.proofreader.enabled ? esc(s.proofreader.model) : "выключена"}.
+      Литовский словарь: ${s.proofreader.dictionary ? "подключён" : "недоступен"}.
+      Синтетических строк для обучения: ${s.synthetic}${s.synthetic ? "" : " (создайте их через synth.bat)"}.</p>
     <p class="muted">Слова, которые вы исправили одинаково хотя бы дважды, дальше правятся автоматически и подсвечиваются для проверки.
-      Когда проверенных страниц наберётся 50–100, закройте сервер и запустите <b>train.bat</b>: модель дообучится на вашем почерке.</p>
+      Когда проверенных страниц наберётся 20–30, закройте сервер и запустите <b>train.bat</b>: модель дообучится на вашем почерке.</p>
     <h3>Путаница в буквах</h3>
     ${s.letters.length ? `<table>${rows(s.letters)}</table>` : '<p class="muted">Пока нет данных.</p>'}
     <h3>Частые исправления слов</h3>

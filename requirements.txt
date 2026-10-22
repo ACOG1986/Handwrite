@@ -10,3 +10,5 @@ transformers>=5.0
 peft>=0.21
 accelerate>=1.10
 bitsandbytes>=0.48; platform_system != "Darwin"
+spylls>=0.1.7        # Lithuanian spelling check (Hunspell dictionaries in pure Python)
+fonttools>=4.50      # checks that handwriting fonts have Lithuanian letters (synth.py)
