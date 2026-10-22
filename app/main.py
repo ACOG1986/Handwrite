@@ -1,4 +1,5 @@
 import io
+import ipaddress
 import threading
 import time
 import zipfile
@@ -46,6 +47,8 @@ def _lan_addresses() -> list[str]:
                 found.append(ip)
     except OSError:
         pass
+    # Home networks use private ranges; VPN adapters (e.g. Radmin VPN, 26.x.x.x) don't, so list them last.
+    found.sort(key=lambda ip: not ipaddress.ip_address(ip).is_private)
     return found or ["IP-адрес-этого-компьютера"]
 
 
