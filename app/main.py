@@ -1,3 +1,4 @@
+import base64
 import io
 import ipaddress
 import threading
@@ -10,9 +11,10 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel
 
-from . import docx_export, learning, ocr, storage
+from . import docx_export, learning, ocr, segment, storage
 
 STATIC = Path(__file__).parent / "static"
 
@@ -181,6 +183,81 @@ def add_sample(file: UploadFile = File(...), label: str = Form(...)):
         return storage.add_sample(file.file.read(), label)
     except Exception:
         raise HTTPException(400, "Не удалось открыть изображение")
+
+
+def _data_url(jpeg: bytes) -> str:
+    return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+
+
+@app.post("/api/samples/line")
+def cut_line(file: UploadFile = File(...), label: str = Form(...), mode: str = Form("letters")):
+    """Cuts a photo of one written line into letters or words and shows the result; nothing is saved as a sample yet."""
+    labels = segment.labels_for(label, mode)
+    if not labels:
+        raise HTTPException(400, "Напишите, что написано в строке")
+    try:
+        line_id = storage.save_line_photo(file.file.read())
+    except Exception:
+        raise HTTPException(400, "Не удалось открыть изображение")
+    path = storage.line_photo_path(line_id)
+    with Image.open(path) as img:
+        img.load()
+    try:
+        boxes, warnings = segment.segment(img, len(labels), mode)
+    except segment.SegmentError as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, str(e))
+    height = _line_height(boxes)
+    preview = segment.overlay(img, boxes)
+    preview.thumbnail((1200, 1200))
+    return {
+        "id": line_id,
+        "label": label.strip(),
+        "warnings": warnings,
+        "overlay": _data_url(segment.jpeg(preview, 80)),
+        "pieces": [{"box": b, "label": t, "image": _data_url(segment.jpeg(segment.crop(img, b, height), 85))}
+                   for b, t in zip(boxes, labels)],
+    }
+
+
+def _line_height(boxes: list[dict]) -> int:
+    heights = sorted(b["y1"] - b["y0"] for b in boxes)
+    return heights[len(heights) // 2] if heights else 50
+
+
+class Box(BaseModel):
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+
+
+class Piece(BaseModel):
+    box: Box
+    label: str
+
+
+class LineSave(BaseModel):
+    pieces: list[Piece]
+    whole_line: str = ""  # also keep the whole photo with this label, if not empty
+
+
+@app.post("/api/samples/line/{line_id}")
+def save_line(line_id: str, body: LineSave):
+    path = storage.line_photo_path(line_id)
+    if path is None:
+        raise HTTPException(404, "Фото строки не найдено, загрузите его заново")
+    with Image.open(path) as img:
+        img.load()
+    boxes = [p.box.model_dump() for p in body.pieces if p.label.strip()]
+    height = _line_height(boxes)
+    items = [(segment.jpeg(segment.crop(img, p.box.model_dump(), height)), p.label)
+             for p in body.pieces if p.label.strip()]
+    if body.whole_line.strip():
+        items.append((storage.normalize_image(path.read_bytes()), body.whole_line))
+    added = storage.add_samples(items, line=line_id)
+    path.unlink(missing_ok=True)
+    return {"added": len(added)}
 
 
 @app.get("/api/samples/{sample_id}/image")

@@ -54,7 +54,13 @@
   .letters button { min-width: 40px; padding: 8px 0; font-size: 18px; }
   .samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .samples figure { margin: 0; }
-  .samples img { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+  .samples img { width: 100%; max-height: 140px; object-fit: contain; background: #fff; border-radius: 8px; border: 1px solid var(--line); }
+  .pieces { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin: 10px 0; }
+  .pieces figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: var(--bg); }
+  .pieces figure.off { opacity: .35; }
+  .pieces img { width: 100%; height: 72px; object-fit: contain; background: #fff; border-radius: 4px; }
+  .pieces input[type=text] { padding: 4px; text-align: center; margin-top: 4px; }
+  #linePreview > img { width: 100%; border-radius: 8px; border: 1px solid var(--line); margin-top: 10px; }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent;
              border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -115,6 +121,21 @@
           <input id="sampleFile" type="file" accept="image/*" hidden>
         </label>
       </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Нарезать строку на буквы</h3>
+      <p class="muted" style="margin-top:0">Напишите в одну строку буквы (или слова) с промежутками между ними, сфотографируйте строку и напишите, что в ней. Приложение само разрежет фото на отдельные буквы или слова и подпишет каждую.</p>
+      <input id="lineLabel" type="text" placeholder="Что в строке, например: a ą b c č d e ę ė">
+      <div class="row" style="margin-top:8px">
+        <label><input type="radio" name="lineMode" value="letters" checked> по буквам</label>
+        <label><input type="radio" name="lineMode" value="words"> по словам</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="btn primary grow">📷 Нарезать строку
+          <input id="lineFile" type="file" accept="image/*" hidden>
+        </label>
+      </div>
+      <div id="linePreview"></div>
     </div>
     <div id="samples" class="samples"></div>
   </section>
@@ -317,12 +338,12 @@ for (const ch of LT) {
   };
   bar.appendChild(b);
 }
-document.addEventListener("focusin", e => bar.classList.toggle("show", e.target.tagName === "TEXTAREA" || e.target.id === "sampleLabel"));
-document.addEventListener("focusout", () => setTimeout(() => {
-  const el = document.activeElement;
-  bar.classList.toggle("show", el && (el.tagName === "TEXTAREA" || el.id === "sampleLabel"));
-}, 50));
-$("#sampleLabel").addEventListener("focus", e => activeArea = e.target);
+const typesText = el => el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type === "text"));
+document.addEventListener("focusin", e => {
+  bar.classList.toggle("show", typesText(e.target));
+  if (typesText(e.target)) activeArea = e.target;
+});
+document.addEventListener("focusout", () => setTimeout(() => bar.classList.toggle("show", typesText(document.activeElement)), 50));
 $("#zoom").onclick = () => $("#zoom").style.display = "none";
 
 // ---------- samples ----------
@@ -348,6 +369,59 @@ $("#sampleFile").onchange = async e => {
   try { await api("/api/samples", { method: "POST", body: fd }); $("#sampleLabel").value = ""; loadSamples(); }
   catch (err) { alert(err.message); }
 };
+
+// ---------- line of letters -> samples ----------
+$("#lineFile").onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  const label = $("#lineLabel").value.trim();
+  if (!label) return alert("Сначала напишите, что написано в строке.");
+  const mode = $("input[name=lineMode]:checked").value;
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("label", label);
+  fd.append("mode", mode);
+  $("#linePreview").innerHTML = '<p class="muted"><span class="spinner"></span> Нарезаю…</p>';
+  try { showLine(await (await api("/api/samples/line", { method: "POST", body: fd })).json()); }
+  catch (err) { $("#linePreview").innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+};
+
+function showLine(line) {
+  const box = $("#linePreview");
+  box.innerHTML = `<img src="${line.overlay}" alt="">
+    ${line.warnings.map(w => `<p class="error">${esc(w)}</p>`).join("")}
+    <p class="muted">Проверьте подписи. Неудачный кусочек можно выключить нажатием на картинку.</p>
+    <div class="pieces"></div>
+    <label class="muted"><input type="checkbox" id="lineWhole" checked> сохранить и всю строку целиком</label>
+    <div class="row" style="margin-top:8px">
+      <button class="primary grow" id="lineSave">Сохранить</button>
+      <button id="lineCancel">Отмена</button>
+    </div>`;
+  const grid = $(".pieces", box);
+  const figs = line.pieces.map(p => {
+    const f = document.createElement("figure");
+    f.innerHTML = `<img src="${p.image}" alt=""><input type="text" value="${esc(p.label)}">`;
+    $("img", f).onclick = () => { f.classList.toggle("off"); count(); };
+    grid.appendChild(f);
+    return f;
+  });
+  const count = () => $("#lineSave").textContent = `Сохранить ${figs.filter(f => !f.classList.contains("off")).length} шт.`;
+  count();
+  $("#lineCancel").onclick = () => box.innerHTML = "";
+  $("#lineSave").onclick = async () => {
+    const pieces = line.pieces.map((p, i) => ({ box: p.box, label: $("input", figs[i]).value.trim() }))
+      .filter((p, i) => p.label && !figs[i].classList.contains("off"));
+    const body = { pieces, whole_line: $("#lineWhole").checked ? line.label : "" };
+    try {
+      const r = await (await api(`/api/samples/line/${line.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })).json();
+      box.innerHTML = `<p class="muted">Добавлено образцов: ${r.added}.</p>`;
+      $("#lineLabel").value = "";
+      loadSamples();
+    } catch (err) { alert(err.message); }
+  };
+}
 
 // ---------- stats ----------
 async function loadStats() {
