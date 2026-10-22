@@ -52,8 +52,26 @@ def _lan_addresses() -> list[str]:
     return found or ["IP-адрес-этого-компьютера"]
 
 
+def _quiet_windows_disconnects():
+    """On Windows, a phone closing its connection logs a harmless ConnectionResetError traceback; hide those."""
+    import asyncio
+    import sys
+
+    if sys.platform != "win32":
+        return
+    loop = asyncio.get_running_loop()
+
+    def handler(loop, context):
+        if isinstance(context.get("exception"), ConnectionResetError):
+            return
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+
 @asynccontextmanager
 async def lifespan(_app):
+    _quiet_windows_disconnects()
     addresses = _lan_addresses()
     print(f"\n  Откройте на телефоне (та же Wi-Fi сеть): http://{addresses[0]}:8000", flush=True)
     for ip in addresses[1:]:
@@ -87,6 +105,17 @@ def _run_ocr(page: dict) -> dict:
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(STATIC / "favicon.ico")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def touch_icon():
+    return FileResponse(STATIC / "icon.png")
 
 
 # ---------- pages ----------
