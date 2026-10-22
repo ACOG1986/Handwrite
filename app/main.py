@@ -28,20 +28,34 @@ def _preload_model():
         print(f"Не удалось загрузить модель: {type(e).__name__}: {e}", flush=True)
 
 
-def _lan_address() -> str:
+def _lan_addresses() -> list[str]:
+    """IPv4 addresses the phone might reach; the default-route one first."""
     import socket
 
+    found = []
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("192.168.0.1", 80))  # no packet is sent; this just picks the Wi-Fi interface
-            return s.getsockname()[0]
+            s.connect(("192.168.0.1", 80))  # no packet is sent; this just picks the main interface
+            found.append(s.getsockname()[0])
     except OSError:
-        return "IP-адрес-этого-компьютера"
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in found and not ip.startswith("127."):
+                found.append(ip)
+    except OSError:
+        pass
+    return found or ["IP-адрес-этого-компьютера"]
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    print(f"\n  Откройте на телефоне (та же Wi-Fi сеть): http://{_lan_address()}:8000\n", flush=True)
+    addresses = _lan_addresses()
+    print(f"\n  Откройте на телефоне (та же Wi-Fi сеть): http://{addresses[0]}:8000", flush=True)
+    for ip in addresses[1:]:
+        print(f"  Если не открывается, попробуйте: http://{ip}:8000", flush=True)
+    print("  Телефон не подключается? Запустите allow_phone.bat (разрешит порт 8000 в брандмауэре).\n", flush=True)
     if ocr.BACKEND == "local":
         threading.Thread(target=_preload_model, daemon=True).start()
     yield
