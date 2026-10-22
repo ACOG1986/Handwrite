@@ -6,6 +6,7 @@ to the proofreader as hints. The dictionary is downloaded once into data/dict/.
 
 import re
 import threading
+import time
 import urllib.request
 
 from . import learning, storage
@@ -18,6 +19,8 @@ _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*", re.UNICODE)  # letters only: num
 _lock = threading.Lock()
 _dict = None
 _failed = False
+_own_cache = (0.0, set())  # (when computed, words): reading every verified page per word was slow
+OWN_WORDS_TTL = 30
 
 
 def _load():
@@ -48,13 +51,23 @@ def available() -> bool:
     return _load() is not None
 
 
+def forget_own_words():
+    """Call after the user saves a page so its words count as known right away."""
+    global _own_cache
+    _own_cache = (0.0, set())
+
+
 def _own_words() -> set[str]:
     """Words the writer used in verified pages or typed as corrections: their names, terms, abbreviations."""
+    global _own_cache
+    if time.time() - _own_cache[0] < OWN_WORDS_TTL:
+        return _own_cache[1]
     words = set()
     for page in storage.verified_pages(10_000):
         words.update(w.lower() for w in _WORD.findall(page["text"]))
     for s in learning.top_substitutions(10_000):
         words.add(s["right"].lower())
+    _own_cache = (time.time(), words)
     return words
 
 

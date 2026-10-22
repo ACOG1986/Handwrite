@@ -158,6 +158,7 @@ def save_page_text(page_id: str, body: PageText):
     learned = learning.record_correction(page["text"], body.text)
     page.update(text=body.text, status="verified", verified_at=time.time())
     storage.save_page(page)
+    spell.forget_own_words()
     return {**page, "learned": learned}
 
 
@@ -268,7 +269,7 @@ def save_line(line_id: str, body: LineSave):
 @app.get("/api/samples/{sample_id}/image")
 def sample_image(sample_id: str):
     path = storage.sample_image_path(sample_id)
-    if "/" in sample_id or not path.exists():
+    if not storage.valid_id(sample_id) or not path.exists():
         raise HTTPException(404)
     return FileResponse(path, media_type="image/jpeg")
 
@@ -333,10 +334,12 @@ def dataset_zip():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for p in storage.list_pages():
-            if p["status"] == "verified":
+            if p["status"] == "verified" and storage.page_image_path(p["id"]).exists():
                 z.write(storage.page_image_path(p["id"]), f"pages/{p['id']}.jpg")
                 z.writestr(f"pages/{p['id']}.txt", p["text"])
         for s in storage.list_samples():
+            if not storage.sample_image_path(s["id"]).exists():
+                continue
             z.write(storage.sample_image_path(s["id"]), f"samples/{s['id']}.jpg")
             z.writestr(f"samples/{s['id']}.txt", s["label"])
     return Response(buf.getvalue(), media_type="application/zip",

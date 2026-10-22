@@ -3,7 +3,7 @@
 import os
 import re
 
-from . import learning, storage
+from . import gpu, learning, storage
 
 BACKEND = os.environ.get("HANDAPP_OCR", "local")  # "mock" for testing the UI without a model
 AUTO_FIX_MIN_COUNT = int(os.environ.get("HANDAPP_AUTOFIX_MIN", "2"))
@@ -63,10 +63,16 @@ def recognize(page_id: str) -> tuple[str, list[str]]:
     else:
         from . import local_model
 
+        failure = None
         try:
             raw = local_model.generate(storage.page_image_path(page_id), build_prompt())
         except Exception as e:  # model download, out of memory, missing CUDA...
-            raise OCRError(f"Локальная модель не смогла распознать страницу: {type(e).__name__}: {e}")
+            failure = f"Локальная модель не смогла распознать страницу: {type(e).__name__}: {e}"
+            if "OutOfMemory" in type(e).__name__:
+                failure += " Не хватило памяти видеокарты: уменьшите HANDAPP_MAX_PIXELS в .env или закройте другие программы."
+        if failure:
+            gpu.free_cache()  # outside the except block, so the failed run's tensors are already released
+            raise OCRError(failure)
     if not raw.strip():
         raise OCRError("Модель вернула пустой ответ.")
     text, uncertain = _split_uncertain(raw)

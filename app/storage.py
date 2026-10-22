@@ -3,6 +3,8 @@
 import io
 import json
 import os
+import re
+import shutil
 import threading
 import time
 import uuid
@@ -26,10 +28,15 @@ LEARNING_FILE = DATA_DIR / "learning.json"
 # Line photos keep more detail: one letter is a small part of the photo.
 LINE_MAX_EDGE = 3000
 
-# Claude downsizes anything larger than ~1568px on the long edge, so sending more only costs upload time.
+# Long edge of a stored page photo; the reader shrinks it further to HANDAPP_MAX_PIXELS (local_model.py).
 MAX_EDGE = 1568
 
 _lock = threading.Lock()
+_ID = re.compile(r"[0-9A-Za-z-]+")  # what new_id() makes; anything else (.., \ on Windows) is refused
+
+
+def valid_id(item_id: str) -> bool:
+    return bool(_ID.fullmatch(item_id))
 
 
 def _ensure_dirs():
@@ -47,7 +54,14 @@ def _read_json(path: Path, default):
 def _write_json(path: Path, data):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    for attempt in range(20):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:  # Windows: another thread is reading the file right now
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def normalize_image(raw: bytes, max_edge: int = MAX_EDGE) -> bytes:
@@ -90,7 +104,7 @@ def page_image_path(page_id: str) -> Path:
 
 
 def get_page(page_id: str) -> dict | None:
-    if "/" in page_id or ".." in page_id:
+    if not valid_id(page_id):
         return None
     return _read_json(PAGES_DIR / page_id / "page.json", None)
 
@@ -107,12 +121,9 @@ def list_pages() -> list[dict]:
 
 
 def delete_page(page_id: str):
-    folder = PAGES_DIR / page_id
     if get_page(page_id) is None:
         return
-    for f in folder.iterdir():
-        f.unlink()
-    folder.rmdir()
+    shutil.rmtree(PAGES_DIR / page_id)
 
 
 def verified_pages(limit: int) -> list[dict]:
@@ -168,10 +179,12 @@ def save_line_photo(raw_image: bytes) -> str:
 
 def line_photo_path(line_id: str) -> Path | None:
     path = LINES_DIR / f"{line_id}.jpg"
-    return path if "/" not in line_id and ".." not in line_id and path.exists() else None
+    return path if valid_id(line_id) and path.exists() else None
 
 
 def delete_sample(sample_id: str):
+    if not valid_id(sample_id):
+        return
     with _lock:
         index = [s for s in _samples_index() if s["id"] != sample_id]
         _write_json(SAMPLES_DIR / "samples.json", index)

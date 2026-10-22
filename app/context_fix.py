@@ -211,12 +211,16 @@ def fix_page(page_id: str):
     if not page or page.get("fix_status") != "pending":
         return
     text = page["ocr_text"]
+    failure = None
     try:
         fixed, changes = proofread(text, page.get("uncertain", []), page.get("unknown", []))
     except Exception as e:  # out of memory, model download failed: the page keeps the reader's text
-        print(f"Корректор не сработал: {type(e).__name__}: {e}", flush=True)
+        failure = f"{type(e).__name__}: {e}"
+    if failure:
+        print(f"Корректор не сработал: {failure}", flush=True)
+        gpu.free_cache()
         page = storage.get_page(page_id) or page
-        page.update(fix_status="error", fix_error=f"{type(e).__name__}: {e}")
+        page.update(fix_status="error", fix_error=failure)
         storage.save_page(page)
         return
     page = storage.get_page(page_id)  # re-read: the user may have saved or re-recognized it meanwhile

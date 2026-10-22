@@ -241,11 +241,10 @@ function pageCard(p, index) {
           <button data-a="retry">Распознать заново</button>
           <button data-a="delete">Удалить</button>
         </div>
-        <div class="muted" data-msg></div>
+        <div class="muted" data-msg>${esc(p._msg || "")}</div>
       </div>
     </div>`;
   const ta = $("textarea", card);
-  const msg = $("[data-msg]", card);
   ta.oninput = () => { p.text = ta.value; p._edited = true; };  // survive re-renders while other pages upload
   const img = $("img", card);
   if (img) img.onclick = () => { $("#zoom img").src = `/api/pages/${p.id}/image`; $("#zoom").style.display = "block"; };
@@ -258,6 +257,8 @@ function pageCard(p, index) {
   ta.addEventListener("focus", () => activeArea = ta);
   card.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
     const a = b.dataset.a;
+    const before = p.status;
+    p._msg = "";
     try {
       if (a === "up" && index > 0) { [docIds[index - 1], docIds[index]] = [docIds[index], docIds[index - 1]]; }
       else if (a === "down" && index < docIds.length - 1) { [docIds[index + 1], docIds[index]] = [docIds[index], docIds[index + 1]]; }
@@ -268,13 +269,14 @@ function pageCard(p, index) {
                                                           body: JSON.stringify({ text: ta.value }) })).json();
         Object.assign(p, r);
         p._edited = false;
-        msg.textContent = r.learned ? `Сохранено. Запомнил исправлений: ${r.learned}.` : "Сохранено.";
-        b.disabled = false;
-        return;
+        p._msg = r.learned ? `Сохранено. Запомнил исправлений: ${r.learned}.` : "Сохранено.";
       }
       else if (a === "retry") {
+        if ((p.status === "verified" || p._edited) &&
+            !confirm("Распознать заново? Ваши исправления на этой странице заменятся новым текстом.")) return;
         p.status = "pending"; p.error = null; render();
         Object.assign(p, await (await api(`/api/pages/${p.id}/retry`, { method: "POST" })).json());
+        p._edited = false;
       }
       else if (a === "delete") {
         if (!confirm("Удалить эту страницу насовсем?")) return;
@@ -284,7 +286,12 @@ function pageCard(p, index) {
       }
       store("docIds", docIds);
       render();
-    } catch (e) { msg.textContent = e.message; b.disabled = false; }
+    } catch (e) {
+      // the card may have been re-rendered (retry shows a spinner), so keep the message on the page itself
+      if (p.status === "pending") p.status = before;
+      p._msg = e.message;
+      render();
+    }
   });
   return card;
 }
@@ -321,7 +328,8 @@ $("#newdoc").onclick = () => {
 $("#export").onclick = async () => {
   const ids = docIds.filter(id => !id.startsWith("tmp-"));
   if (!ids.length) return alert("Сначала добавьте страницы.");
-  const unsaved = ids.filter(id => pages.find(p => p.id === id)?.status !== "verified").length;
+  // Word gets the saved text, so typed but unsaved edits would be missing from it
+  const unsaved = ids.filter(id => { const p = pages.find(x => x.id === id); return p?.status !== "verified" || p._edited; }).length;
   if (unsaved && !confirm(`Страниц без сохранённых исправлений: ${unsaved}. Всё равно скачать?`)) return;
   try {
     const r = await api("/api/export", { method: "POST", headers: { "Content-Type": "application/json" },
