@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Конспекты в Word</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc;
+    --accent: #2f5bd3; --accent-text: #fff; --warn: #b3261e; --warn-bg: #fdecea; --hl: #fff2b3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --card: #1f1f22; --text: #f2f2f4; --muted: #9a9aa2; --line: #333338;
+      --accent: #6d8ff0; --accent-text: #0d0d10; --warn: #ff8a80; --warn-bg: #3a1d1b; --hl: #5a4c12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; padding: 12px 16px 4px; font-size: 18px; }
+  nav { display: flex; gap: 4px; padding: 0 12px 8px; }
+  nav button { flex: 1; padding: 8px 6px; font-size: 15px; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; padding-bottom: 120px; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+           padding: 10px 14px; border-radius: 10px; cursor: pointer; text-align: center; }
+  button.primary, .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button:disabled { opacity: .5; }
+  button.small { padding: 6px 10px; font-size: 14px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .grow { flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 14px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .error { color: var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 8px; font-size: 14px; }
+  .page-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 720px) { .page-grid { grid-template-columns: 240px 1fr; } }
+  .page-grid img { width: 100%; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
+  textarea { width: 100%; min-height: 220px; font: 15px/1.5 ui-monospace, Menlo, monospace; padding: 10px;
+             border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  input[type=text] { font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+                     background: var(--card); color: var(--text); width: 100%; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .chip { background: var(--hl); border-radius: 999px; padding: 2px 10px; font-size: 14px; cursor: pointer; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .badge.verified { border-color: #2e7d32; color: #2e7d32; }
+  .letters { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: none; gap: 4px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+             background: var(--card); border-top: 1px solid var(--line); overflow-x: auto; }
+  .letters.show { display: flex; }
+  .letters button { min-width: 40px; padding: 8px 0; font-size: 18px; }
+  .samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .samples figure { margin: 0; }
+  .samples img { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent;
+             border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 10; display: none; overflow: auto; }
+  #zoom img { width: 100%; }
+  .hidden { display: none !important; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Конспекты → Word</h1>
+  <nav>
+    <button data-tab="doc" class="active">Документ</button>
+    <button data-tab="samples">Мой почерк</button>
+    <button data-tab="stats">Обучение</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Document -->
+  <section id="tab-doc">
+    <div class="row" style="margin-bottom:14px">
+      <label class="btn primary grow">📷 Сфотографировать
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="btn grow">🖼 Из галереи
+        <input id="gallery" type="file" accept="image/*" multiple hidden>
+      </label>
+    </div>
+    <div id="pages"></div>
+    <p id="empty" class="muted">Сфотографируйте страницу тетради. После распознавания проверьте текст: каждое исправление учит систему вашему почерку.</p>
+
+    <div class="card export">
+      <input id="title" type="text" placeholder="Название документа (необязательно)">
+      <div class="row" style="margin-top:8px">
+        <label class="grow muted"><input id="breaks" type="checkbox"> Каждая страница с нового листа</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="export" class="primary grow">Скачать Word</button>
+        <button id="newdoc">Новый документ</button>
+      </div>
+      <details style="margin-top:10px">
+        <summary class="muted">Архив страниц</summary>
+        <div id="archive" style="margin-top:8px"></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- Samples -->
+  <section id="tab-samples" class="hidden">
+    <div class="card">
+      <p style="margin-top:0">Сфотографируйте образец своего почерка: алфавит, отдельные буквы (особенно ą č ę ė į š ų ū ž) или слова, и напишите, что там написано. Образцы попадают в дообучение модели вместе с проверенными страницами.</p>
+      <input id="sampleLabel" type="text" placeholder="Что написано на образце, например: a ą b c č d e ę ė">
+      <div class="row" style="margin-top:8px">
+        <label class="btn primary grow">📷 Добавить образец
+          <input id="sampleFile" type="file" accept="image/*" hidden>
+        </label>
+      </div>
+    </div>
+    <div id="samples" class="samples"></div>
+  </section>
+
+  <!-- Stats -->
+  <section id="tab-stats" class="hidden">
+    <div id="stats" class="card"></div>
+  </section>
+</main>
+
+<div class="letters" id="letters"></div>
+<div id="zoom"><img alt=""></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const LT = "ą č ę ė į š ų ū ž Ą Č Ę Ė Į Š Ų Ū Ž".split(" ");
+let pages = [];
+let docIds = load("docIds", []);
+
+function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }
+function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch {}
+    throw new Error(msg);
+  }
+  return r;
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+  for (const t of ["doc", "samples", "stats"]) $("#tab-" + t).classList.toggle("hidden", t !== b.dataset.tab);
+  if (b.dataset.tab === "samples") loadSamples();
+  if (b.dataset.tab === "stats") loadStats();
+});
+
+// ---------- pages ----------
+async function loadPages() {
+  pages = await (await api("/api/pages")).json();
+  docIds = docIds.filter(id => pages.some(p => p.id === id));
+  store("docIds", docIds);
+  render();
+}
+
+function render() {
+  const box = $("#pages");
+  box.innerHTML = "";
+  $("#empty").classList.toggle("hidden", docIds.length > 0);
+  docIds.forEach((id, i) => {
+    const p = pages.find(x => x.id === id);
+    if (p) box.appendChild(pageCard(p, i));
+  });
+  const archive = pages.filter(p => !docIds.includes(p.id)).reverse();
+  $("#archive").innerHTML = archive.length ? "" : '<p class="muted">Пусто</p>';
+  for (const p of archive) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginBottom = "6px";
+    row.innerHTML = `<span class="grow muted">${esc(new Date(p.created * 1000).toLocaleString())} · ${esc((p.text || "").slice(0, 40))}</span>
+      <button class="small">Добавить</button>`;
+    row.querySelector("button").onclick = () => { docIds.push(p.id); store("docIds", docIds); render(); };
+    $("#archive").appendChild(row);
+  }
+}
+
+function pageCard(p, index) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const status = p.status === "verified" ? '<span class="badge verified">проверено</span>'
+               : p.status === "pending" ? '<span class="badge"><span class="spinner"></span> распознаю…</span>'
+               : '<span class="badge">распознано</span>';
+  card.innerHTML = `
+    <div class="row" style="margin-bottom:8px">
+      <strong>Стр. ${index + 1}</strong> ${status}
+      <span class="grow"></span>
+      <button class="small" data-a="up" title="Выше">↑</button>
+      <button class="small" data-a="down" title="Ниже">↓</button>
+      <button class="small" data-a="remove" title="Убрать из документа">✕</button>
+    </div>
+    <div class="page-grid">
+      ${p.id.startsWith("tmp-") ? '<div class="muted">Загружаю фото…</div>' : `<img src="/api/pages/${p.id}/image" alt="Фото страницы" loading="lazy">`}
+      <div>
+        ${p.error ? `<p class="error">${esc(p.error)}</p>` : ""}
+        ${p.uncertain?.length ? `<div class="muted">Не уверен в словах (нажмите, чтобы найти):</div>
+          <div class="chips">${p.uncertain.map(w => `<span class="chip">${esc(w)}</span>`).join("")}</div>` : ""}
+        <textarea spellcheck="true" lang="lt">${esc(p.text || "")}</textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="primary grow" data-a="save">Сохранить исправления</button>
+          <button data-a="retry">Распознать заново</button>
+          <button data-a="delete">Удалить</button>
+        </div>
+        <div class="muted" data-msg></div>
+      </div>
+    </div>`;
+  const ta = $("textarea", card);
+  const msg = $("[data-msg]", card);
+  ta.oninput = () => { p.text = ta.value; };  // survive re-renders while other pages upload
+  const img = $("img", card);
+  if (img) img.onclick = () => { $("#zoom img").src = `/api/pages/${p.id}/image`; $("#zoom").style.display = "block"; };
+  card.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+    const i = ta.value.indexOf(c.textContent);
+    if (i >= 0) { ta.focus(); ta.setSelectionRange(i, i + c.textContent.length); }
+  });
+  ta.addEventListener("focus", () => activeArea = ta);
+  card.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
+    const a = b.dataset.a;
+    try {
+      if (a === "up" && index > 0) { [docIds[index - 1], docIds[index]] = [docIds[index], docIds[index - 1]]; }
+      else if (a === "down" && index < docIds.length - 1) { [docIds[index + 1], docIds[index]] = [docIds[index], docIds[index + 1]]; }
+      else if (a === "remove") { docIds.splice(index, 1); }
+      else if (a === "save") {
+        b.disabled = true;
+        const r = await (await api(`/api/pages/${p.id}`, { method: "PUT", headers: { "Content-Type": "application/json" },
+                                                          body: JSON.stringify({ text: ta.value }) })).json();
+        Object.assign(p, r);
+        msg.textContent = r.learned ? `Сохранено. Запомнил исправлений: ${r.learned}.` : "Сохранено.";
+        b.disabled = false;
+        return;
+      }
+      else if (a === "retry") {
+        p.status = "pending"; p.error = null; render();
+        Object.assign(p, await (await api(`/api/pages/${p.id}/retry`, { method: "POST" })).json());
+      }
+      else if (a === "delete") {
+        if (!confirm("Удалить эту страницу насовсем?")) return;
+        await api(`/api/pages/${p.id}`, { method: "DELETE" });
+        pages = pages.filter(x => x.id !== p.id);
+        docIds = docIds.filter(x => x !== p.id);
+      }
+      store("docIds", docIds);
+      render();
+    } catch (e) { msg.textContent = e.message; b.disabled = false; }
+  });
+  return card;
+}
+
+async function uploadFiles(files) {
+  for (const file of files) {
+    const tempId = "tmp-" + Math.random();
+    pages.push({ id: tempId, status: "pending", text: "", created: Date.now() / 1000 });
+    docIds.push(tempId);
+    render();
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const page = await (await api("/api/pages", { method: "POST", body: fd })).json();
+      pages = pages.map(p => p.id === tempId ? page : p);
+      docIds = docIds.map(id => id === tempId ? page.id : id);
+    } catch (e) {
+      pages = pages.filter(p => p.id !== tempId);
+      docIds = docIds.filter(id => id !== tempId);
+      alert("Не удалось загрузить фото: " + e.message);
+    }
+    store("docIds", docIds.filter(id => !id.startsWith("tmp-")));
+    render();
+  }
+}
+$("#camera").onchange = e => { uploadFiles([...e.target.files]); e.target.value = ""; };
+$("#gallery").onchange = e => { uploadFiles([...e.target.files]); e.target.value = ""; };
+
+$("#newdoc").onclick = () => {
+  if (docIds.length && !confirm("Начать новый документ? Текущие страницы останутся в архиве.")) return;
+  docIds = []; store("docIds", docIds); $("#title").value = ""; render();
+};
+
+$("#export").onclick = async () => {
+  const ids = docIds.filter(id => !id.startsWith("tmp-"));
+  if (!ids.length) return alert("Сначала добавьте страницы.");
+  const unsaved = ids.filter(id => pages.find(p => p.id === id)?.status !== "verified").length;
+  if (unsaved && !confirm(`Страниц без сохранённых исправлений: ${unsaved}. Всё равно скачать?`)) return;
+  try {
+    const r = await api("/api/export", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page_ids: ids, title: $("#title").value, page_breaks: $("#breaks").checked }) });
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = ($("#title").value.trim() || "konspektas") + ".docx";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (e) { alert(e.message); }
+};
+
+// ---------- Lithuanian letter bar ----------
+let activeArea = null;
+const bar = $("#letters");
+for (const ch of LT) {
+  const b = document.createElement("button");
+  b.textContent = ch;
+  b.onmousedown = b.ontouchstart = e => e.preventDefault(); // keep the textarea focused
+  b.onclick = () => {
+    if (!activeArea) return;
+    const { selectionStart: s, selectionEnd: e } = activeArea;
+    activeArea.setRangeText(ch, s, e, "end");
+    activeArea.dispatchEvent(new Event("input"));
+  };
+  bar.appendChild(b);
+}
+document.addEventListener("focusin", e => bar.classList.toggle("show", e.target.tagName === "TEXTAREA" || e.target.id === "sampleLabel"));
+document.addEventListener("focusout", () => setTimeout(() => {
+  const el = document.activeElement;
+  bar.classList.toggle("show", el && (el.tagName === "TEXTAREA" || el.id === "sampleLabel"));
+}, 50));
+$("#sampleLabel").addEventListener("focus", e => activeArea = e.target);
+$("#zoom").onclick = () => $("#zoom").style.display = "none";
+
+// ---------- samples ----------
+async function loadSamples() {
+  const list = await (await api("/api/samples")).json();
+  $("#samples").innerHTML = list.length ? "" : '<p class="muted">Образцов пока нет.</p>';
+  for (const s of list.reverse()) {
+    const f = document.createElement("figure");
+    f.innerHTML = `<img src="/api/samples/${s.id}/image" alt=""><figcaption class="muted">${esc(s.label)}</figcaption>
+      <button class="small">Удалить</button>`;
+    $("button", f).onclick = async () => { await api(`/api/samples/${s.id}`, { method: "DELETE" }); loadSamples(); };
+    $("#samples").appendChild(f);
+  }
+}
+$("#sampleFile").onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  const label = $("#sampleLabel").value.trim();
+  if (!label) return alert("Сначала напишите, что изображено на образце.");
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("label", label);
+  try { await api("/api/samples", { method: "POST", body: fd }); $("#sampleLabel").value = ""; loadSamples(); }
+  catch (err) { alert(err.message); }
+};
+
+// ---------- stats ----------
+async function loadStats() {
+  const s = await (await api("/api/stats")).json();
+  const rows = (list) => list.map(x => `<tr><td>${esc(x.wrong)}</td><td>→ ${esc(x.right)}</td><td>${x.count}×</td></tr>`).join("");
+  $("#stats").innerHTML = `
+    <p style="margin-top:0">Страниц: <b>${s.pages}</b>, проверено вами: <b>${s.verified}</b>, образцов почерка: <b>${s.samples}</b>.</p>
+    <p class="muted">Модель: ${esc(s.model)} (${esc(s.device)})${s.adapter ? ", дообучена на вашем почерке" : ", ещё не дообучена"}${s.loaded ? "" : ". Модель загружается…"}</p>
+    <p class="muted">Слова, которые вы исправили одинаково хотя бы дважды, дальше правятся автоматически и подсвечиваются для проверки.
+      Когда проверенных страниц наберётся 50–100, закройте сервер и запустите <b>train.bat</b>: модель дообучится на вашем почерке.</p>
+    <h3>Путаница в буквах</h3>
+    ${s.letters.length ? `<table>${rows(s.letters)}</table>` : '<p class="muted">Пока нет данных.</p>'}
+    <h3>Частые исправления слов</h3>
+    ${s.substitutions.length ? `<table>${rows(s.substitutions)}</table>` : '<p class="muted">Пока нет данных.</p>'}
+    <p style="margin-top:16px"><a class="btn" href="/api/dataset.zip">Скачать датасет (фото + проверенный текст)</a></p>
+    <p class="muted">Этот датасет пригодится, чтобы позже дообучить локальную модель под ваш почерк.</p>`;
+}
+
+loadPages().catch(e => alert(e.message));
+</script>
+</body>
+</html>
